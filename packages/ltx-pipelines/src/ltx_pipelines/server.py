@@ -51,8 +51,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host IP")
     parser.add_argument("--port", type=int, default=8000, help="Port")
-    args, _ = parser.parse_known_args()
-    return args
+    parser.set_defaults(prompt="", output_path="output.mp4")
+    return parser.parse_args()
 
 
 GLOBAL_ARGS = parse_args()
