@@ -10,13 +10,27 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update && apt-get install -y --no-install-recommends git python3-pip python3-dev build-essential \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+WORKDIR /app
+
 RUN uv venv /app/.venv
+
+COPY pyproject.toml uv.lock ./
+COPY ./packages/ltx-core/pyproject.toml ./packages/ltx-core
+COPY ./packages/ltx-pipelines/pyproject.toml ./packages/ltx-pipelines
+COPY ./packages/ltx-trainer/pyproject.toml ./packages/ltx-trainer
+COPY ./packages/ltx-kernels/pyproject.toml ./packages/ltx-kernels
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --package ltx-pipelines --no-install-project --extra natten --extra server
+
+COPY ./packages/ltx-core ./packages/ltx-core
+COPY ./packages/ltx-pipelines ./packages/ltx-pipelines
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --package ltx-pipelines --extra natten --extra server
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-COPY . /app
-
-RUN uv --directory /app sync --extra natten && uv --directory /app add "fastapi[standard]" --package ltx-pipelines
 
 # Setup and run on server
 # hf download Lightricks/LTX-2.5 \
