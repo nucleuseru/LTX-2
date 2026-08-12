@@ -14,20 +14,9 @@ WORKDIR /app
 
 RUN uv venv /app/.venv
 
-COPY pyproject.toml ./
-COPY ./packages/ltx-core/pyproject.toml ./packages/ltx-core
-COPY ./packages/ltx-pipelines/pyproject.toml ./packages/ltx-pipelines
-COPY ./packages/ltx-trainer/pyproject.toml ./packages/ltx-trainer
-COPY ./packages/ltx-kernels/pyproject.toml ./packages/ltx-kernels
+COPY . .
 
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --package ltx-pipelines --no-install-project --extra server
-
-COPY ./packages/ltx-core ./packages/ltx-core
-COPY ./packages/ltx-pipelines ./packages/ltx-pipelines
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --package ltx-pipelines  --extra server
+RUN uv sync --extra server
 
 ENV PATH="/app/.venv/bin:$PATH"
 
