@@ -14,7 +14,7 @@ WORKDIR /app
 
 RUN uv venv /app/.venv
 
-COPY pyproject.toml uv.lock /app/
+COPY pyproject.toml ./
 COPY ./packages/ltx-core/pyproject.toml ./packages/ltx-core
 COPY ./packages/ltx-pipelines/pyproject.toml ./packages/ltx-pipelines
 COPY ./packages/ltx-trainer/pyproject.toml ./packages/ltx-trainer
