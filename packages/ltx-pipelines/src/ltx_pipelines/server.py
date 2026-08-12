@@ -19,13 +19,12 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 
-from ltx_core.components.guiders import MultiModalGuiderParams
 from ltx_core.model.video_vae import AUTO_TILING, get_video_chunks_number
-from ltx_pipelines.ti2vid_two_stages import TI2VidTwoStagesPipeline
+from ltx_pipelines.distilled import DistilledPipeline
 from ltx_pipelines.utils.args import (
     ImageConditioningInput,
     add_generated_keyframes_arg,
-    default_2_stage_arg_parser,
+    default_2_stage_distilled_arg_parser,
     resolve_cli_params,
 )
 from ltx_pipelines.utils.media_io import (
@@ -45,21 +44,19 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def parse_args() -> argparse.Namespace:
-    params = resolve_cli_params()
+    params = resolve_cli_params(distilled=True)
     parser = add_generated_keyframes_arg(
-        default_2_stage_arg_parser(params=params, supports_auto_duration=True)
+        default_2_stage_distilled_arg_parser(params=params, supports_auto_duration=True)
     )
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host IP")
     parser.add_argument("--port", type=int, default=8000, help="Port")
-    parser.set_defaults(prompt="", output_path="output.mp4")
     return parser.parse_args()
 
 
 GLOBAL_ARGS = parse_args()
 
-pipeline = TI2VidTwoStagesPipeline(
+pipeline = DistilledPipeline(
     model_paths=GLOBAL_ARGS.model_paths,
-    distilled_lora=GLOBAL_ARGS.distilled_lora,
     spatial_upsampler_path=GLOBAL_ARGS.spatial_upsampler_path,
     loras=tuple(GLOBAL_ARGS.lora) if GLOBAL_ARGS.lora else (),
     quantization=GLOBAL_ARGS.quantization,
@@ -187,19 +184,18 @@ def run_generation_task(
 
         video, audio, resolved_frames, tiling_config = pipeline(
             prompt=prompt,
-            negative_prompt=kwargs.get("negative_prompt", GLOBAL_ARGS.negative_prompt),
             seed=kwargs.get("seed", random.randint(0, 2**31 - 1)),
             height=h,
             width=w,
             num_frames=num_frames,
             frame_rate=frame_rate,
-            num_inference_steps=kwargs.get("num_inference_steps", 8),
-            video_guider_params=MultiModalGuiderParams(cfg_scale=3.0),
-            audio_guider_params=MultiModalGuiderParams(cfg_scale=7.0),
             images=images,
             vae_dtype=vae_dtype,
             color_space=hdr,
             tiling_config=AUTO_TILING,
+            enhance_prompt=kwargs.get("enhance_prompt", False),
+            enhance_static_cache=kwargs.get("enhance_static_cache", False),
+            generated_keyframes=kwargs.get("num_generated_keyframes", 0),
         )
 
         job["progress"] = 80
