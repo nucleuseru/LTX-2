@@ -16,7 +16,7 @@ RUN uv venv /app/.venv
 
 COPY . .
 
-RUN uv sync --package ltx_pipelines --extra server
+RUN uv sync --extra natten --extra server
 
 ENV PATH="/app/.venv/bin:$PATH"
 
@@ -36,5 +36,5 @@ ENV PATH="/app/.venv/bin:$PATH"
 #     --video-vae-path         models/ltx-2.5/vae/ltx-2.5-video-vae-bf16.safetensors \
 #     --audio-vae-path         models/ltx-2.5/vae/ltx-2.5-audio-vae-bf16.safetensors \
 #     --spatial-upsampler-path models/ltx-2.5/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors \
-#     --offload cpu
+#     --offload cpu --prompt "" --output-path "output.mp4"
 
