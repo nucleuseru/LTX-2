@@ -21,13 +21,13 @@ COPY ./packages/ltx-trainer/pyproject.toml ./packages/ltx-trainer
 COPY ./packages/ltx-kernels/pyproject.toml ./packages/ltx-kernels
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --package ltx-pipelines --no-install-project --extra natten --extra server
+    uv sync --package ltx-pipelines --no-install-project --extra server
 
 COPY ./packages/ltx-core ./packages/ltx-core
 COPY ./packages/ltx-pipelines ./packages/ltx-pipelines
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --package ltx-pipelines --extra natten --extra server
+    uv sync --package ltx-pipelines  --extra server
 
 ENV PATH="/app/.venv/bin:$PATH"
 
