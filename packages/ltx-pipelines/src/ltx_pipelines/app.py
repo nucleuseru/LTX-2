@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import torch
+import asyncio
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
@@ -154,6 +155,9 @@ def prepare_images(
     return images
 
 
+task_lock = asyncio.Lock()
+
+
 @torch.inference_mode()
 def run_generation_task(
     video_id: str,
@@ -163,64 +167,69 @@ def run_generation_task(
     input_refs: list[InputReference],
     **kwargs: Any,
 ) -> None:
-    job = JOBS.get(video_id)
-    if not job:
-        return
+    async with task_lock:
+        job = JOBS.get(video_id)
+        if not job:
+            return
 
-    job["status"] = "in_progress"
-    job["progress"] = 10
+        job["status"] = "in_progress"
+        job["progress"] = 10
 
-    try:
         try:
-            w, h = map(int, size_str.lower().split("x"))
-        except Exception:
-            w, h = 720, 1280
+            try:
+                w, h = map(int, size_str.lower().split("x"))
+            except Exception:
+                w, h = 720, 1280
 
-        frame_rate = kwargs.get("frame_rate", 24.0)
-        num_frames = int(float(seconds_str) * frame_rate) + 1
-        images = prepare_images(input_refs, num_frames)
+            frame_rate = kwargs.get("frame_rate", 24.0)
+            num_frames = int(float(seconds_str) * frame_rate) + 1
+            images = prepare_images(input_refs, num_frames)
 
-        job["progress"] = 30
-        hdr = resolve_hdr_color_space(images=images, hdr=kwargs.get("hdr", None))
-        vae_dtype = vae_dtype_for_hdr(hdr, torch.bfloat16)
+            job["progress"] = 30
+            hdr = resolve_hdr_color_space(images=images, hdr=kwargs.get("hdr", None))
+            vae_dtype = vae_dtype_for_hdr(hdr, torch.bfloat16)
 
-        video, audio, resolved_frames, tiling_config = pipeline(
-            prompt=prompt,
-            negative_prompt=kwargs.get("negative_prompt", GLOBAL_ARGS.negative_prompt),
-            seed=kwargs.get("seed", random.randint(0, 2**31 - 1)),
-            height=h,
-            width=w,
-            num_frames=num_frames,
-            frame_rate=frame_rate,
-            num_inference_steps=kwargs.get("num_inference_steps", 40),
-            video_guider_params=MultiModalGuiderParams(cfg_scale=3.0),
-            audio_guider_params=MultiModalGuiderParams(cfg_scale=7.0),
-            images=images,
-            vae_dtype=vae_dtype,
-            color_space=hdr,
-            tiling_config=AUTO_TILING,
-        )
+            video, audio, resolved_frames, tiling_config = pipeline(
+                prompt=prompt,
+                negative_prompt=kwargs.get(
+                    "negative_prompt", GLOBAL_ARGS.negative_prompt
+                ),
+                seed=kwargs.get("seed", random.randint(0, 2**31 - 1)),
+                height=h,
+                width=w,
+                num_frames=num_frames,
+                frame_rate=frame_rate,
+                num_inference_steps=kwargs.get("num_inference_steps", 40),
+                video_guider_params=MultiModalGuiderParams(cfg_scale=3.0),
+                audio_guider_params=MultiModalGuiderParams(cfg_scale=7.0),
+                images=images,
+                vae_dtype=vae_dtype,
+                color_space=hdr,
+                tiling_config=AUTO_TILING,
+            )
 
-        job["progress"] = 80
-        out_path = OUTPUT_DIR / f"{video_id}.mp4"
-        encode_video(
-            video=video,
-            fps=frame_rate,
-            audio=audio,
-            output_path=str(out_path),
-            video_chunks_number=get_video_chunks_number(resolved_frames, tiling_config),
-            color_space=hdr,
-        )
+            job["progress"] = 80
+            out_path = OUTPUT_DIR / f"{video_id}.mp4"
+            encode_video(
+                video=video,
+                fps=frame_rate,
+                audio=audio,
+                output_path=str(out_path),
+                video_chunks_number=get_video_chunks_number(
+                    resolved_frames, tiling_config
+                ),
+                color_space=hdr,
+            )
 
-        job["status"] = "completed"
-        job["progress"] = 100
-        job["completed_at"] = int(time.time())
-        job["output_path"] = str(out_path)
+            job["status"] = "completed"
+            job["progress"] = 100
+            job["completed_at"] = int(time.time())
+            job["output_path"] = str(out_path)
 
-    except Exception as err:
-        logger.exception("Generation error for %s", video_id)
-        job["status"] = "failed"
-        job["error"] = {"code": "generation_failed", "message": str(err)}
+        except Exception as err:
+            logger.exception("Generation error for %s", video_id)
+            job["status"] = "failed"
+            job["error"] = {"code": "generation_failed", "message": str(err)}
 
 
 # Endpoints
@@ -340,5 +349,3 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host=GLOBAL_ARGS.host, port=GLOBAL_ARGS.port)
-
-
