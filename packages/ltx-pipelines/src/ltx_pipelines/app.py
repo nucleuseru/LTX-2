@@ -80,7 +80,7 @@ class CreateVideoRequest(BaseModel):
     input_reference: InputReference | None = None
     model: str = "lightricks/ltx-2.5"
     seconds: str | int = "10"
-    size: str = "720x1280"
+    size: str = "1280x736"
 
 
 class VideoError(BaseModel):
@@ -177,7 +177,7 @@ def run_generation_task(
         try:
             w, h = map(int, size_str.lower().split("x"))
         except Exception:
-            w, h = 720, 1280
+            w, h = 1280, 736
 
         frame_rate = kwargs.get("frame_rate", 24.0)
         num_frames = int(float(seconds_str) * frame_rate) + 1
