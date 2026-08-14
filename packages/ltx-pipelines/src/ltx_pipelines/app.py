@@ -13,20 +13,20 @@ import urllib.request
 import uuid
 from pathlib import Path
 from typing import Any, Literal
+from contextlib import asynccontextmanager
 
 import torch
 import asyncio
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 
-from ltx_core.components.guiders import MultiModalGuiderParams
 from ltx_core.model.video_vae import AUTO_TILING, get_video_chunks_number
-from ltx_pipelines.ti2vid_two_stages import TI2VidTwoStagesPipeline
+from ltx_pipelines.distilled import DistilledPipeline
 from ltx_pipelines.utils.args import (
     ImageConditioningInput,
     add_generated_keyframes_arg,
-    default_2_stage_arg_parser,
+    default_2_stage_distilled_arg_parser,
     resolve_cli_params,
 )
 from ltx_pipelines.utils.media_io import (
@@ -38,17 +38,15 @@ from ltx_pipelines.utils.media_io import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ltx_server")
 
-app = FastAPI(title="LTX-2 OpenAI Compatible Video Generation API")
-
 JOBS: dict[str, dict[str, Any]] = {}
 OUTPUT_DIR = Path("outputs")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def parse_args() -> argparse.Namespace:
-    params = resolve_cli_params()
+    params = resolve_cli_params(distilled=True)
     parser = add_generated_keyframes_arg(
-        default_2_stage_arg_parser(params=params, supports_auto_duration=True)
+        default_2_stage_distilled_arg_parser(params=params, supports_auto_duration=True)
     )
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host IP")
     parser.add_argument("--port", type=int, default=8000, help="Port")
@@ -57,9 +55,8 @@ def parse_args() -> argparse.Namespace:
 
 GLOBAL_ARGS = parse_args()
 
-pipeline = TI2VidTwoStagesPipeline(
+pipeline = DistilledPipeline(
     model_paths=GLOBAL_ARGS.model_paths,
-    distilled_lora=GLOBAL_ARGS.distilled_lora,
     spatial_upsampler_path=GLOBAL_ARGS.spatial_upsampler_path,
     loras=tuple(GLOBAL_ARGS.lora) if GLOBAL_ARGS.lora else (),
     quantization=GLOBAL_ARGS.quantization,
@@ -155,7 +152,8 @@ def prepare_images(
     return images
 
 
-task_lock = asyncio.Lock()
+JobTask = tuple[str, str, str, str, list[InputReference], dict[str, Any]]
+job_queue: asyncio.Queue[JobTask] = asyncio.Queue()
 
 
 @torch.inference_mode()
@@ -167,82 +165,114 @@ def run_generation_task(
     input_refs: list[InputReference],
     **kwargs: Any,
 ) -> None:
-    async with task_lock:
-        job = JOBS.get(video_id)
-        if not job:
-            return
+    job = JOBS.get(video_id)
+    if not job:
+        return
 
-        job["status"] = "in_progress"
-        job["progress"] = 10
+    time.sleep(1)  # dummy delay
+    job["status"] = "in_progress"
+    job["progress"] = 10
 
+    try:
         try:
-            try:
-                w, h = map(int, size_str.lower().split("x"))
-            except Exception:
-                w, h = 720, 1280
+            w, h = map(int, size_str.lower().split("x"))
+        except Exception:
+            w, h = 720, 1280
 
-            frame_rate = kwargs.get("frame_rate", 24.0)
-            num_frames = int(float(seconds_str) * frame_rate) + 1
-            images = prepare_images(input_refs, num_frames)
+        frame_rate = kwargs.get("frame_rate", 24.0)
+        num_frames = int(float(seconds_str) * frame_rate) + 1
+        images = prepare_images(input_refs, num_frames)
 
-            job["progress"] = 30
-            hdr = resolve_hdr_color_space(images=images, hdr=kwargs.get("hdr", None))
-            vae_dtype = vae_dtype_for_hdr(hdr, torch.bfloat16)
+        job["progress"] = 30
+        hdr = resolve_hdr_color_space(images=images, hdr=kwargs.get("hdr", None))
+        vae_dtype = vae_dtype_for_hdr(hdr, torch.bfloat16)
 
-            video, audio, resolved_frames, tiling_config = pipeline(
-                prompt=prompt,
-                negative_prompt=kwargs.get(
-                    "negative_prompt", GLOBAL_ARGS.negative_prompt
-                ),
-                seed=kwargs.get("seed", random.randint(0, 2**31 - 1)),
-                height=h,
-                width=w,
-                num_frames=num_frames,
-                frame_rate=frame_rate,
-                num_inference_steps=kwargs.get("num_inference_steps", 40),
-                video_guider_params=MultiModalGuiderParams(cfg_scale=3.0),
-                audio_guider_params=MultiModalGuiderParams(cfg_scale=7.0),
-                images=images,
-                vae_dtype=vae_dtype,
-                color_space=hdr,
-                tiling_config=AUTO_TILING,
+        video, audio, resolved_frames, tiling_config = pipeline(
+            prompt=prompt,
+            seed=kwargs.get("seed", random.randint(0, 2**31 - 1)),
+            height=h,
+            width=w,
+            num_frames=num_frames,
+            frame_rate=frame_rate,
+            images=images,
+            vae_dtype=vae_dtype,
+            color_space=hdr,
+            tiling_config=AUTO_TILING,
+            enhance_prompt=kwargs.get("enhance_prompt", False),
+            enhance_static_cache=kwargs.get("enhance_static_cache", False),
+        )
+
+        job["progress"] = 80
+        out_path = OUTPUT_DIR / f"{video_id}.mp4"
+        encode_video(
+            video=video,
+            fps=frame_rate,
+            audio=audio,
+            output_path=str(out_path),
+            video_chunks_number=get_video_chunks_number(resolved_frames, tiling_config),
+            color_space=hdr,
+        )
+
+        job["status"] = "completed"
+        job["progress"] = 100
+        job["completed_at"] = int(time.time())
+        job["output_path"] = str(out_path)
+
+    except Exception as err:
+        logger.exception("Generation error for %s", video_id)
+        job["status"] = "failed"
+        job["error"] = {"code": "generation_failed", "message": str(err)}
+
+
+async def queue_worker() -> None:
+    while True:
+        video_id, prompt, seconds_str, size_str, input_refs, kwargs = (
+            await job_queue.get()
+        )
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None,
+                run_generation_task,
+                video_id,
+                prompt,
+                seconds_str,
+                size_str,
+                input_refs,
+                **kwargs,
             )
+        except Exception:
+            logger.exception("Error processing generation task for %s", video_id)
+        finally:
+            job_queue.task_done()
 
-            job["progress"] = 80
-            out_path = OUTPUT_DIR / f"{video_id}.mp4"
-            encode_video(
-                video=video,
-                fps=frame_rate,
-                audio=audio,
-                output_path=str(out_path),
-                video_chunks_number=get_video_chunks_number(
-                    resolved_frames, tiling_config
-                ),
-                color_space=hdr,
-            )
 
-            job["status"] = "completed"
-            job["progress"] = 100
-            job["completed_at"] = int(time.time())
-            job["output_path"] = str(out_path)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    worker_task = asyncio.create_task(queue_worker())
+    yield
+    worker_task.cancel()
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        pass
 
-        except Exception as err:
-            logger.exception("Generation error for %s", video_id)
-            job["status"] = "failed"
-            job["error"] = {"code": "generation_failed", "message": str(err)}
+
+app = FastAPI(
+    title="LTX-2 OpenAI Compatible Video Generation API",
+    lifespan=lifespan,
+)
 
 
 # Endpoints
 @app.post("/videos", response_model=VideoObject)
 @app.post("/v1/videos", response_model=VideoObject)
-async def create_video(
-    req: CreateVideoRequest, background_tasks: BackgroundTasks
-) -> VideoObject:
+async def create_video(req: CreateVideoRequest) -> VideoObject:
     refs = req.input_references or (
         [req.input_reference] if req.input_reference else []
     )
     video_id = f"video_{uuid.uuid4().hex[:12]}"
-    extra_body = req.__pydantic_extra__
+    extra_body = req.__pydantic_extra__ or {}
 
     job = {
         "id": video_id,
@@ -262,14 +292,8 @@ async def create_video(
     }
     JOBS[video_id] = job
 
-    background_tasks.add_task(
-        run_generation_task,
-        video_id=video_id,
-        prompt=req.prompt,
-        seconds_str=str(req.seconds),
-        size_str=req.size,
-        input_refs=refs,
-        **extra_body,
+    job_queue.put_nowait(
+        (video_id, req.prompt, str(req.seconds), req.size, refs, extra_body)
     )
 
     return VideoObject(**job)

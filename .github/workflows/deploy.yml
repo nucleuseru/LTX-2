@@ -32,6 +32,6 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/ltx-2.5:v1.0
+            ${{ secrets.DOCKERHUB_USERNAME }}/ltx-2.5:v1.1
           cache-from: type=gha
           cache-to: type=gha,mode=max
