@@ -21,12 +21,13 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 
+from ltx_core.components.guiders import MultiModalGuiderParams
 from ltx_core.model.video_vae import AUTO_TILING, get_video_chunks_number
-from ltx_pipelines.distilled import DistilledPipeline
+from ltx_pipelines.ti2vid_two_stages import TI2VidTwoStagesPipeline
 from ltx_pipelines.utils.args import (
     ImageConditioningInput,
     add_generated_keyframes_arg,
-    default_2_stage_distilled_arg_parser,
+    default_2_stage_arg_parser,
     resolve_cli_params,
 )
 from ltx_pipelines.utils.media_io import (
@@ -44,9 +45,9 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def parse_args() -> argparse.Namespace:
-    params = resolve_cli_params(distilled=True)
+    params = resolve_cli_params()
     parser = add_generated_keyframes_arg(
-        default_2_stage_distilled_arg_parser(params=params, supports_auto_duration=True)
+        default_2_stage_arg_parser(params=params, supports_auto_duration=True)
     )
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host IP")
     parser.add_argument("--port", type=int, default=8000, help="Port")
@@ -55,8 +56,9 @@ def parse_args() -> argparse.Namespace:
 
 GLOBAL_ARGS = parse_args()
 
-pipeline = DistilledPipeline(
+pipeline = TI2VidTwoStagesPipeline(
     model_paths=GLOBAL_ARGS.model_paths,
+    distilled_lora=GLOBAL_ARGS.distilled_lora,
     spatial_upsampler_path=GLOBAL_ARGS.spatial_upsampler_path,
     loras=tuple(GLOBAL_ARGS.lora) if GLOBAL_ARGS.lora else (),
     quantization=GLOBAL_ARGS.quantization,
@@ -189,17 +191,54 @@ def run_generation_task(
 
         video, audio, resolved_frames, tiling_config = pipeline(
             prompt=prompt,
+            negative_prompt=kwargs.get("negative_prompt", GLOBAL_ARGS.negative_prompt),
             seed=kwargs.get("seed", random.randint(0, 2**31 - 1)),
             height=h,
             width=w,
             num_frames=num_frames,
             frame_rate=frame_rate,
+            num_inference_steps=kwargs.get(
+                "num_inference_steps", GLOBAL_ARGS.num_inference_steps
+            ),
+            video_guider_params=MultiModalGuiderParams(
+                cfg_scale=kwargs.get(
+                    "video_cfg_guidance_scale", GLOBAL_ARGS.video_cfg_guidance_scale
+                ),
+                stg_scale=kwargs.get(
+                    "video_stg_guidance_scale", GLOBAL_ARGS.video_stg_guidance_scale
+                ),
+                rescale_scale=kwargs.get(
+                    "video_rescale_scale", GLOBAL_ARGS.video_rescale_scale
+                ),
+                modality_scale=kwargs.get(
+                    "a2v_guidance_scale", GLOBAL_ARGS.a2v_guidance_scale
+                ),
+                skip_step=kwargs.get("video_skip_step", GLOBAL_ARGS.video_skip_step),
+                stg_blocks=kwargs.get("video_stg_blocks", GLOBAL_ARGS.video_stg_blocks),
+            ),
+            audio_guider_params=MultiModalGuiderParams(
+                cfg_scale=kwargs.get(
+                    "audio_cfg_guidance_scale", GLOBAL_ARGS.audio_cfg_guidance_scale
+                ),
+                stg_scale=kwargs.get(
+                    "audio_stg_guidance_scale", GLOBAL_ARGS.audio_stg_guidance_scale
+                ),
+                rescale_scale=kwargs.get(
+                    "audio_rescale_scale", GLOBAL_ARGS.audio_rescale_scale
+                ),
+                modality_scale=kwargs.get(
+                    "v2a_guidance_scale", GLOBAL_ARGS.v2a_guidance_scale
+                ),
+                skip_step=kwargs.get("audio_skip_step", GLOBAL_ARGS.audio_skip_step),
+                stg_blocks=kwargs.get("audio_stg_blocks", GLOBAL_ARGS.audio_stg_blocks),
+            ),
             images=images,
             vae_dtype=vae_dtype,
             color_space=hdr,
             tiling_config=AUTO_TILING,
             enhance_prompt=kwargs.get("enhance_prompt", False),
             enhance_static_cache=kwargs.get("enhance_static_cache", False),
+            max_batch_size=kwargs.get("max_batch_size", GLOBAL_ARGS.max_batch_size),
         )
 
         job["progress"] = 80
