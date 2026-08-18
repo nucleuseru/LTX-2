@@ -171,7 +171,6 @@ def run_generation_task(
     if not job:
         return
 
-    time.sleep(1)  # dummy delay
     job["status"] = "in_progress"
     job["progress"] = 10
 

@@ -1,4 +1,4 @@
-hf download Lightricks/LTX-2.5 \
+uvx hf download Lightricks/LTX-2.5 \
     diffusion_models/ltx-2.5-22b-dev-transformer-bf16.safetensors \
     text_encoders/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors \
     vae/ltx-2.5-video-vae-bf16.safetensors \
@@ -14,4 +14,5 @@ uv run python -m ltx_pipelines.app \
     --audio-vae-path         models/ltx-2.5/vae/ltx-2.5-audio-vae-bf16.safetensors \
     --spatial-upsampler-path models/ltx-2.5/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors \
     --distilled-lora         models/ltx-2.5/loras/ltx-2.5-22b-distilled-lora-450-bf16.safetensors \
-    --offload cpu --max-batch-size 4 --compile --prompt "" --output-path "output.mp4"
+    --compile --quantization nvfp4-cast --max-batch-size 8 --offload none \
+    --prompt "" --output-path "output.mp4"
