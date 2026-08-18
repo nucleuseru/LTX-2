@@ -131,12 +131,12 @@ def prepare_images(
 
         if ref.image_url.startswith("data:image/"):
             data = base64.b64decode(ref.image_url.split(",", 1)[1])
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpeg")
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
             tmp.write(data)
             tmp.close()
             path = tmp.name
         elif ref.image_url.startswith(("http://", "https://")):
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpeg")
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
             with urllib.request.urlopen(ref.image_url) as resp:
                 tmp.write(resp.read())
             tmp.close()
