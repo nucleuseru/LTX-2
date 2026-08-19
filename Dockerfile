@@ -16,7 +16,7 @@ RUN uv venv /app/.venv
 
 COPY . .
 
-RUN uv sync --extra server --group kernels && uv pip install 'flash-attn-4==4.0.0b9'
+RUN uv sync --extra server
 
 ENV PATH="/app/.venv/bin:$PATH"
 

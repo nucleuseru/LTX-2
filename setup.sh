@@ -8,6 +8,9 @@ uvx hf download Lightricks/LTX-2.5 \
     --local-dir models/ltx-2.5
 
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+
+uv sync --extra server --group kernels && uv pip install 'flash-attn-4==4.0.0b9'
+
 uv run python -m ltx_pipelines.app \
     --transformer-path       models/ltx-2.5/diffusion_models/ltx-2.5-22b-dev-transformer-bf16.safetensors \
     --text-encoder-path      models/ltx-2.5/text_encoders/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors \
