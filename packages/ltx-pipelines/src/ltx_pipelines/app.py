@@ -21,6 +21,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 
+from ltx_core.allocator_trim_strategy import AllocatorTrimStrategy
 from ltx_core.components.guiders import MultiModalGuiderParams
 from ltx_core.model.video_vae import AUTO_TILING, get_video_chunks_number
 from ltx_pipelines.ti2vid_two_stages import TI2VidTwoStagesPipeline
@@ -64,6 +65,7 @@ pipeline = TI2VidTwoStagesPipeline(
     quantization=GLOBAL_ARGS.quantization,
     compilation_config=GLOBAL_ARGS.compile,
     offload_mode=GLOBAL_ARGS.offload_mode,
+    alloc_trim_strategy = AllocatorTrimStrategy.DEFER,
     prompt_enhancer_gemma_root=GLOBAL_ARGS.prompt_enhancer_gemma_root,
     diffvae_optimization=GLOBAL_ARGS.diffvae_optimization,
 )
