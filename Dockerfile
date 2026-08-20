@@ -16,7 +16,7 @@ RUN uv venv /app/.venv
 
 COPY . .
 
-RUN uv sync --extra server
+RUN uv sync --extra natten --extra server
 
 ENV PATH="/app/.venv/bin:$PATH"
 
